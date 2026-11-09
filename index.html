@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EchoNet X — Edge Threat Fusion & Telemetry Dashboard</title>
+  
+  <!-- Google Fonts & Font Awesome Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Leaflet CSS for GPS Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- TOP NAVIGATION & HEADER -->
+    <header class="main-header">
+      <div class="brand-section">
+        <div class="pulse-logo">
+          <i class="fa-solid fa-satellite-dish"></i>
+        </div>
+        <div>
+          <h1>ECHONET <span class="accent-text">X</span></h1>
+          <p class="subtitle">Distributed Tactical Sensing & Threat Fusion Network</p>
+        </div>
+      </div>
+
+      <div class="header-status-group">
+        <div class="status-chip">
+          <span class="chip-label">NODE ID</span>
+          <span class="chip-value highlight" id="node-id-val">NODE 1 (Rathinam College)</span>
+        </div>
+        <div class="status-chip">
+          <span class="chip-label">FIRMWARE</span>
+          <span class="chip-value highlight">v1.0.1-unified</span>
+        </div>
+        <div class="status-chip">
+          <span class="chip-label">MODE</span>
+          <span class="chip-value" id="connection-mode-label">SIMULATOR</span>
+        </div>
+
+        <div id="threat-level-badge" class="threat-badge level-green">
+          <i class="fa-solid fa-shield-halved" id="threat-icon"></i>
+          <span id="threat-level-text">LEVEL: GREEN</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button id="btn-web-serial" class="btn btn-outline" title="Connect to physical ESP32 via USB Serial">
+          <i class="fa-solid fa-plug"></i> WebSerial Connect
+        </button>
+        <button id="btn-toggle-sim" class="btn btn-primary" title="Toggle Simulation Engine">
+          <i class="fa-solid fa-play" id="sim-play-icon"></i> <span id="sim-play-text">Pause Sim</span>
+        </button>
+        <button id="btn-audio-mute" class="btn btn-icon" title="Toggle Alert Siren Sound">
+          <i class="fa-solid fa-volume-xmark" id="mute-icon"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- EMERGENCY ALERT BANNER (Latched RED state) -->
+    <div id="emergency-banner" class="emergency-banner hidden">
+      <div class="alert-content">
+        <i class="fa-solid fa-triangle-exclamation flashing-icon"></i>
+        <div class="alert-text">
+          <span class="alert-title">EMERGENCY THREAT ESCALATION DETECTED</span>
+          <span class="alert-desc" id="emergency-desc">Fused threat score exceeded RED threshold (0.75). Immediate LoRa TX triggered!</span>
+        </div>
+      </div>
+      <button class="btn btn-small btn-danger" id="btn-ack-emergency">Acknowledge / Reset Edge</button>
+    </div>
+
+    <!-- MAIN DASHBOARD GRID -->
+    <main class="dashboard-grid">
+      
+      <!-- COLUMN 1: FUSION MATRIX & LORA UPLINK -->
+      <section class="grid-col col-left">
+        
+        <!-- FUSION ENGINE PANEL -->
+        <div class="panel fusion-panel">
+          <div class="panel-header">
+            <h3><i class="fa-solid fa-brain"></i> Sensor Fusion Engine</h3>
+            <span class="badge" id="corroboration-badge">Bonus: Off</span>
+          </div>
+          <div class="panel-body">
+            <div class="fusion-hero">
+              <div class="gauge-container">
+                <canvas id="threatGaugeCanvas" width="220" height="150"></canvas>
+                <div class="gauge-value-display">
+                  <span id="threat-score-num">0.08</span>
+                  <span class="gauge-unit">SCORE</span>
+                </div>
+              </div>
+
+              <div class="fusion-breakdown">
+                <div class="metric-row">
+                  <span class="m-label"><i class="fa-solid fa-eye"></i> Vision Confidence (60%)</span>
+                  <div class="progress-bar-bg">
+                    <div id="bar-vision" class="progress-bar-fill" style="width: 5%;"></div>
+                  </div>
+                  <span id="val-vision" class="m-val">0.05</span>
+                </div>
+
+                <div class="metric-row">
+                  <span class="m-label"><i class="fa-solid fa-microphone-lines"></i> Audio Confidence (40%)</span>
+                  <div class="progress-bar-bg">
+                    <div id="bar-audio" class="progress-bar-fill" style="width: 8%;"></div>
+                  </div>
+                  <span id="val-audio" class="m-val">0.08</span>
+                </div>
+
+                <div class="fusion-formula-box">
+                  <code>Fused = (0.60 * Vision) + (0.40 * Audio) <span id="formula-bonus-text">+ 0.15</span></code>
+                  <div class="threshold-indicators">
+                    <span class="th-pill green"><0.45 GREEN</span>
+                    <span class="th-pill amber">≥0.45 AMBER</span>
+                    <span class="th-pill red">≥0.75 RED</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="latched-state-footer">
+              <span class="status-indicator">
+                <span class="dot" id="dot-red-edge"></span> Edge Latched (<code id="txt-red-edge">false</code>)
+              </span>
+              <span class="status-indicator">
+                Previous: <strong id="txt-prev-level">GREEN</strong>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- LORA LORA PANEL -->
+        <div class="panel lora-panel">
+          <div class="panel-header">
+            <h3><i class="fa-solid fa-radio"></i> SX1276 LoRa Uplink (868 MHz)</h3>
+            <span class="badge badge-info" id="lora-status-badge">Ready</span>
+          </div>
+          <div class="panel-body">
+            <div class="lora-metrics">
+              <div class="mini-stat">
+                <span class="stat-lbl">Heartbeat Interval</span>
+                <span class="stat-val">8000 ms</span>
+              </div>
+              <div class="mini-stat">
+                <span class="stat-lbl">Uptime</span>
+                <span class="stat-val" id="lora-uptime-val">0s</span>
+              </div>
+              <div class="mini-stat">
+                <span class="stat-lbl">Total TX</span>
+                <span class="stat-val" id="lora-tx-count">0</span>
+              </div>
+              <div class="mini-stat">
+                <span class="stat-lbl">Pin Config</span>
+                <span class="stat-val">NSS:5 DIO0:2 RST:14</span>
+              </div>
+            </div>
+
+            <div class="code-block-container">
+              <div class="code-header">
+                <span><i class="fa-solid fa-code"></i> Latest Serialized Telemetry JSON</span>
+                <button class="btn-text" id="btn-copy-json"><i class="fa-regular fa-copy"></i> Copy</button>
+              </div>
+              <pre id="lora-json-preview"><code>{}</code></pre>
+            </div>
+
+            <div class="lora-history">
+              <h4>Transmission Log Stream</h4>
+              <ul id="lora-log-list" class="log-list">
+                <li class="empty-log">Waiting for first LoRa transmission...</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- COLUMN 2: VISION & AUDIO SENSORS -->
+      <section class="grid-col col-mid">
+        
+        <!-- VISION MODULE PANEL -->
+        <div class="panel vision-panel">
+          <div class="panel-header">
+            <h3><i class="fa-solid fa-video"></i> Vision Module (ESP32-CAM AI)</h3>
+            <span class="badge badge-success" id="vision-status">Active Feed</span>
+          </div>
+          <div class="panel-body">
+            <div class="camera-feed-container">
+              <video id="hiddenWebcamVideo" autoplay playsinline muted style="display:none"></video>
+              <canvas id="cameraFeedCanvas" width="480" height="270"></canvas>
+              <div class="feed-overlay">
+                <div class="rec-indicator"><span class="rec-dot"></span> LIVE AI STREAM</div>
+                <div class="fps-counter" id="fps-val">30 FPS</div>
+              </div>
+            </div>
+
+            <div class="vision-controls-row" style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <button id="btn-toggle-laptop-webcam" class="btn btn-outline btn-small" title="Use Laptop Web Camera for Real Live Feed">
+                <i class="fa-solid fa-camera"></i> Use Laptop Webcam
+              </button>
+              <span id="webcam-status-label" class="sc-sub">Synthetic Canvas</span>
+            </div>
+
+            <div class="vision-activities-box">
+              <h4>Detected Target Activities:</h4>
+              <div class="tags-container" id="detected-tags-container">
+                <span class="activity-tag text-muted">No high-threat activity</span>
+              </div>
+            </div>
+
+            <div class="sim-triggers">
+              <h4>Simulation Controls (Override Detections):</h4>
+              <div class="btn-group-grid">
+                <button class="btn btn-sim-tag btn-danger" data-activity="Possible assault">
+                  <i class="fa-solid fa-user-ninja"></i> Assault (0.92)
+                </button>
+                <button class="btn btn-sim-tag btn-warning" data-activity="Physical struggle">
+                  <i class="fa-solid fa-hand-fist"></i> Struggle (0.85)
+                </button>
+                <button class="btn btn-sim-tag btn-amber" data-activity="Continuous waving for assistance">
+                  <i class="fa-solid fa-hand-wave"></i> Waving (0.60)
+                </button>
+                <button class="btn btn-sim-tag btn-secondary" data-activity="Human presence">
+                  <i class="fa-solid fa-person"></i> Human (0.05)
+                </button>
+                <button class="btn btn-sim-tag btn-outline-light" id="btn-clear-vision">
+                  <i class="fa-solid fa-xmark"></i> Clear All
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AUDIO MODULE PANEL -->
+        <div class="panel audio-panel">
+          <div class="panel-header">
+            <h3><i class="fa-solid fa-microphone"></i> INMP441 I2S Audio Module</h3>
+            <span class="badge" id="audio-status-badge">I2S 16kHz</span>
+          </div>
+          <div class="panel-body">
+            <div class="audio-visualizer-container">
+              <canvas id="audioWaveformCanvas" width="480" height="100"></canvas>
+            </div>
+
+            <div class="audio-metrics-grid">
+              <div class="stat-card">
+                <span class="sc-label">Computed RMS</span>
+                <span class="sc-val" id="audio-rms-val">0.00</span>
+                <span class="sc-sub">Bit shifted >> 14</span>
+              </div>
+              <div class="stat-card">
+                <span class="sc-label">Audio Score</span>
+                <span class="sc-val highlight" id="audio-score-val">0.08</span>
+                <span class="sc-sub" id="audio-tier-val">Low Ambient</span>
+              </div>
+            </div>
+
+            <div class="audio-controls">
+              <div class="control-row">
+                <label><i class="fa-solid fa-volume-high"></i> Simulated Noise Level:</label>
+                <input type="range" id="slider-audio-rms" min="100" max="12000" value="450" step="50">
+                <span id="slider-rms-display" class="range-val">450</span>
+              </div>
+
+              <div class="control-row-btns">
+                <button id="btn-trigger-shout" class="btn btn-amber btn-small">
+                  <i class="fa-solid fa-bullhorn"></i> Trigger Loud Scream (>8000 RMS)
+                </button>
+                <button id="btn-enable-browser-mic" class="btn btn-outline btn-small">
+                  <i class="fa-solid fa-microphone-lines"></i> Use PC Microphone
+                </button>
+              </div>
+
+              <div class="threshold-legend">
+                <span><i class="fa-solid fa-circle text-success"></i> Normal: &lt;4000</span>
+                <span><i class="fa-solid fa-circle text-amber"></i> MID: ≥4000 (Score 0.85)</span>
+                <span><i class="fa-solid fa-circle text-danger"></i> HIGH: ≥8000 (Score 0.95)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- COLUMN 3: GPS & DIAGNOSTICS -->
+      <section class="grid-col col-right">
+        
+        <!-- GPS MODULE PANEL -->
+        <div class="panel gps-panel">
+          <div class="panel-header">
+            <h3><i class="fa-solid fa-location-dot"></i> Geoapify GPS — Rathinam College</h3>
+            <span class="badge badge-success" id="gps-lock-badge">Fix: Locked</span>
+          </div>
+          <div class="panel-body">
+            <div id="gps-map" class="gps-map-container"></div>
+
+            <div class="gps-stats-grid">
+              <div class="gps-stat">
+                <span class="g-lbl">Satellites</span>
+                <span class="g-val" id="gps-sats-val">12</span>
+              </div>
+              <div class="gps-stat">
+                <span class="g-lbl">Latitude</span>
+                <span class="g-val" id="gps-lat-val">10.937222</span>
+              </div>
+              <div class="gps-stat">
+                <span class="g-lbl">Longitude</span>
+                <span class="g-val" id="gps-lng-val">76.960278</span>
+              </div>
+              <div class="gps-stat">
+                <span class="g-lbl">Location</span>
+                <span class="g-val" id="gps-alt-val">Rathinam Campus</span>
+              </div>
+            </div>
+
+            <div class="gps-actions">
+              <button class="btn btn-outline btn-small" id="btn-add-mesh-node">
+                <i class="fa-solid fa-plus-node"></i> Add Mesh Node 2 (Tech Park)
+              </button>
+              <button class="btn btn-outline btn-small" id="btn-random-gps-drift">
+                <i class="fa-solid fa-route"></i> Campus Jitter
+              </button>
+            </div>
+          </div>
+        </div>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- SERIAL MONITOR & PINOUT DIAGNOSTICS PANEL -->
+        <div class="panel serial-panel">
+          <div class="panel-header">
+            <h3><i class="fa-solid fa-terminal"></i> Serial Output (115200 Baud)</h3>
+            <div class="header-mini-btns">
+              <button class="btn-text" id="btn-clear-serial">Clear</button>
+              <button class="btn-text" id="btn-toggle-autoscroll">AutoScroll: ON</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="terminal-container" id="terminal-output">
+              <div class="term-line sys">[SYSTEM] Dashboard initialized. Select WebSerial or Simulator mode.</div>
+              <div class="term-line sys">[INMP441 Mic] I2S driver installed. SCK:40, WS:42, SD:41</div>
+              <div class="term-line sys">[GPS Block] Neo-6M Module Initialized on UART2.</div>
+              <div class="term-line sys">[VisionBlock] VisionAnalysisModule ready.</div>
+              <div class="term-line sys">[LoRa Block] Initializing SX1276 868 MHz... Success!</div>
+              <div class="term-line sys">[Node] All subsystems online.</div>
+            </div>
+
+            <div class="hardware-info-tabs">
+              <details>
+                <summary><i class="fa-solid fa-microchip"></i> ESP32 Hardware Pinout Matrix</summary>
+                <div class="pinout-table-wrapper">
+                  <table class="pin-table">
+                    <thead>
+                      <tr><th>Subsystem</th><th>ESP32-S3 (Default)</th><th>Classic ESP32 Fallback</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr><td>INMP441 I2S SCK</td><td><code class="pin-tag">GPIO 40</code></td><td><code>GPIO 26</code></td></tr>
+                      <tr><td>INMP441 I2S WS</td><td><code class="pin-tag">GPIO 42</code></td><td><code>GPIO 25</code></td></tr>
+                      <tr><td>INMP441 I2S SD</td><td><code class="pin-tag">GPIO 41</code></td><td><code>GPIO 33</code></td></tr>
+                      <tr><td>GPS Neo-6M RX</td><td><code>GPIO 16</code></td><td><code>GPIO 16</code></td></tr>
+                      <tr><td>GPS Neo-6M TX</td><td><code>GPIO 17</code></td><td><code>GPIO 17</code></td></tr>
+                      <tr><td>LoRa SX1276 NSS</td><td><code>GPIO 5</code></td><td><code>GPIO 5</code></td></tr>
+                      <tr><td>LoRa SX1276 DIO0</td><td><code>GPIO 2</code></td><td><code>GPIO 2</code></td></tr>
+                      <tr><td>LoRa SX1276 RST</td><td><code>GPIO 14</code></td><td><code>GPIO 14</code></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+
+      </section>
+    </main>
+
+  </div>
+
+  <!-- Leaflet JS for Map -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Chart.js for smooth gauge rendering assistance -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <script src="app.js"></script>
+</body>
+</html>

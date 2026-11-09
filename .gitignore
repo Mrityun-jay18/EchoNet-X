@@ -1,0 +1,16 @@
+# PlatformIO & Build Artifacts
+.pio/
+.pioenvs/
+.piolibdeps/
+*.bin
+*.elf
+*.map
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+
+# System
+.DS_Store
+Thumbs.db
